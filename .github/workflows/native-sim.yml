@@ -227,6 +227,12 @@ jobs:
             --port "$PREVIEW_PORT"
             --max-dimension '${{ inputs.max_dimension }}'
             --video-fps '${{ inputs.video_fps }}'
+            # serve-sim 0.6.0 (2026-10-05) refuses any Host that is not
+            # localhost, which breaks viewing through the trycloudflare tunnel.
+            # The auth gate in front of this accepts only the gate token, so
+            # allowing any Host here is exactly the "standalone" mode serve-sim's
+            # own 403 message points at.
+            --allow-any-host-when-insecure
           )
 
           if [ '${{ inputs.transport }}' = 'webrtc' ] && [ -n "$TURN_KEY_ID" ]; then
