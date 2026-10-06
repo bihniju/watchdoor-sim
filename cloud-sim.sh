@@ -115,7 +115,7 @@ native-sim up --app "$APP_URL" --agent --public --minutes "$MINUTES" --device "$
   2>&1 | tee /tmp/cloud-sim.out
 
 URL="$(grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' /tmp/cloud-sim.out | head -1 || true)"
-KEY="$(grep -oE '\?k=[A-Za-z0-9]+' /tmp/cloud-sim.out | head -1 | cut -c4- || true)"
+KEY="$(grep -oE '\?k=[A-Za-z0-9_-]+' /tmp/cloud-sim.out | head -1 | cut -c4- || true)"
 [ -n "$URL" ] || { echo "no tunnel URL returned; inspect the run: gh run list -R $(git -C "$REPO_DIR" remote get-url origin 2>/dev/null | sed 's#.*github.com[:/]##; s#\.git$##')" >&2; exit 1; }
 
 cat <<EOF
