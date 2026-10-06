@@ -223,7 +223,10 @@ jobs:
           # which is the difference between a choppy and a smooth tunnel stream.
           # max-dimension cuts pixels quadratically, saving encode CPU and bytes.
           ARGS=(
-            --detach --quiet
+            # No --detach: its daemon path re-invokes the CLI with only
+            # --detach/udid/--port, which drops --allow-any-host-when-insecure.
+            # Backgrounded with nohup below instead.
+            --quiet
             --port "$PREVIEW_PORT"
             --max-dimension '${{ inputs.max_dimension }}'
             --video-fps '${{ inputs.video_fps }}'
@@ -297,7 +300,9 @@ jobs:
             )
           fi
 
-          npx --yes @expo/serve-sim@latest "${ARGS[@]}" | tee serve-sim.json
+          nohup npx --yes @expo/serve-sim@latest "${ARGS[@]}" > serve-sim.json 2>&1 &
+          echo "serve-sim started in background as pid $!"
+          disown
 
           # /readyz blocks until the simulator and the native capture session are up.
           for _ in $(seq 1 90); do
