@@ -599,7 +599,11 @@ jobs:
             # runner itself and forward it to the developer's tunnel; the launcher
             # then loads http://localhost:8081 and real screens render.
             brew install caddy
-            nohup caddy reverse-proxy --from :8081 --to "$METRO_URL" > caddy-metro.log 2>&1 &
+            # Metro echoes the Host it receives back as the manifest's hostUri,
+            # and the dev client then fetches *that* — so without this the bridge
+            # is bypassed and it retries against <tunnel>:8081, which nothing
+            # serves. Presenting localhost:8081 keeps the loop on the runner.
+            nohup caddy reverse-proxy --from :8081 --to "$METRO_URL" --header_up Host=localhost:8081 > caddy-metro.log 2>&1 &
             disown
             for _ in $(seq 1 30); do
               curl -fsS --max-time 2 http://127.0.0.1:8081/status >/dev/null 2>&1 && break
