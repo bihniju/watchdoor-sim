@@ -534,6 +534,7 @@ jobs:
           APP_URL: ${{ inputs.app_url }}
           APP_RELEASE_ASSET: ${{ inputs.app_release_asset }}
           APP_RELEASE_TAG: native-sim-build
+          METRO_URL: ${{ secrets.NATIVE_SIM_METRO_URL }}
         run: |
           set -euo pipefail
           [ -n "$APP_URL" ] || [ -n "$APP_RELEASE_ASSET" ] \
@@ -590,6 +591,25 @@ jobs:
 
           BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$APP/Info.plist")
           xcrun simctl install "$UDID" "$APP"
+
+          if [ -n "$METRO_URL" ]; then
+            # The Expo dev client rewrites any server you give it to <host>:8081,
+            # and a public HTTPS tunnel only ever answers on 443, so the bundle
+            # request can never reach Metro from out here. Answer :8081 on the
+            # runner itself and forward it to the developer's tunnel; the launcher
+            # then loads http://localhost:8081 and real screens render.
+            brew install caddy
+            nohup caddy reverse-proxy --from :8081 --to "$METRO_URL" > caddy-metro.log 2>&1 &
+            disown
+            for _ in $(seq 1 30); do
+              curl -fsS --max-time 2 http://127.0.0.1:8081/status >/dev/null 2>&1 && break
+              sleep 1
+            done
+            curl -fsS --max-time 10 http://127.0.0.1:8081/status >/dev/null \
+              || { echo "::error::Metro tunnel is not reachable through the runner bridge"; cat caddy-metro.log; exit 1; }
+            echo "Metro bridge ready on simulator localhost:8081"
+          fi
+
           xcrun simctl launch "$UDID" "$BUNDLE_ID"
           echo "Launched $BUNDLE_ID from prebuilt archive"
 
