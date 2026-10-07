@@ -603,7 +603,7 @@ jobs:
             METRO_HOST=$(printf '%s' "$METRO_URL" | sed -E 's#https?://([^/:]+).*#\1#')
             printf '127.0.0.1 %s\n' "$METRO_HOST" | sudo tee -a /etc/hosts > /dev/null
             brew install caddy
-            printf ':8081 {\n  reverse-proxy %s {\n    header_up Host {upstream_hostport}\n  }\n}\n' "$METRO_URL" > metro-caddyfile
+            printf ':8081 {\n  reverse_proxy %s {\n    header_up Host %s\n  }\n}\n' "$METRO_URL" "$METRO_HOST" > metro-caddyfile
             nohup caddy run --config metro-caddyfile --adapter caddyfile > caddy-metro.log 2>&1 &
             disown
             for _ in $(seq 1 30); do
