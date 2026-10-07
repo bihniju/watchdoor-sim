@@ -599,11 +599,14 @@ jobs:
             # resolve the tunnel's own hostname back to the runner and serve :8081
             # there, forwarding to the real tunnel over 443. The upstream Host has
             # to stay the tunnel hostname, because Cloudflare 403s anything else,
-            # so this rewrites to {upstream_hostport} rather than localhost.
+            # and the upstream is dialed by IP so caddy cannot resolve the name we
+            # are about to shadow in /etc/hosts and loop back into itself.
             METRO_HOST=$(printf '%s' "$METRO_URL" | sed -E 's#https?://([^/:]+).*#\1#')
+            METRO_IP=$(dig +short "$METRO_HOST" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+            [ -n "$METRO_IP" ] || { echo "::error::could not resolve $METRO_HOST"; exit 1; }
             printf '127.0.0.1 %s\n' "$METRO_HOST" | sudo tee -a /etc/hosts > /dev/null
             brew install caddy
-            printf ':8081 {\n  reverse_proxy %s {\n    header_up Host %s\n  }\n}\n' "$METRO_URL" "$METRO_HOST" > metro-caddyfile
+            printf ':8081 {\n  reverse_proxy %s:443 {\n    transport http {\n      tls\n      tls_server_name %s\n    }\n    header_up Host %s\n  }\n}\n' "$METRO_IP" "$METRO_HOST" "$METRO_HOST" > metro-caddyfile
             nohup caddy run --config metro-caddyfile --adapter caddyfile > caddy-metro.log 2>&1 &
             disown
             for _ in $(seq 1 30); do
