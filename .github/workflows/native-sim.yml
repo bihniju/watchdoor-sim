@@ -594,18 +594,17 @@ jobs:
 
           if [ -n "$METRO_URL" ]; then
             # The Expo dev client rewrites any server you give it to <host>:8081,
-            # and a public HTTPS tunnel only ever answers on 443, so the bundle
-            # request can never reach Metro from out here. Answer :8081 on the
-            # runner itself and forward it to the developer's tunnel; the launcher
-            # then loads http://localhost:8081 and real screens render.
+            # and a public HTTPS tunnel only answers on 443, so Metro is never
+            # reachable from the simulator as-is. Close the loop on the runner:
+            # resolve the tunnel's own hostname back to the runner and serve :8081
+            # there, forwarding to the real tunnel over 443. The upstream Host has
+            # to stay the tunnel hostname, because Cloudflare 403s anything else,
+            # so this rewrites to {upstream_hostport} rather than localhost.
+            METRO_HOST=$(printf '%s' "$METRO_URL" | sed -E 's#https?://([^/:]+).*#\1#')
+            printf '127.0.0.1 %s\n' "$METRO_HOST" | sudo tee -a /etc/hosts > /dev/null
             brew install caddy
-            # Metro echoes the Host it receives back as the manifest's hostUri,
-            # and the dev client then fetches *that* — so without this the bridge
-            # is bypassed and it retries against <tunnel>:8081, which nothing
-            # serves. Presenting localhost:8081 keeps the loop on the runner.
-            # `caddy reverse-proxy` has no header flag, so this needs a Caddyfile.
-            printf ':8081 {\n  reverse-proxy %s {\n    header_up Host localhost:8081\n  }\n}\n' "$METRO_URL" > metro-caddyfile
-            nohup caddy run --config metro-caddyfile > caddy-metro.log 2>&1 &
+            printf ':8081 {\n  reverse-proxy %s {\n    header_up Host {upstream_hostport}\n  }\n}\n' "$METRO_URL" > metro-caddyfile
+            nohup caddy run --config metro-caddyfile --adapter caddyfile > caddy-metro.log 2>&1 &
             disown
             for _ in $(seq 1 30); do
               curl -fsS --max-time 2 http://127.0.0.1:8081/status >/dev/null 2>&1 && break
