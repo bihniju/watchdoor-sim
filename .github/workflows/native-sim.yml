@@ -593,29 +593,41 @@ jobs:
           xcrun simctl install "$UDID" "$APP"
 
           if [ -n "$METRO_URL" ]; then
-            # The Expo dev client rewrites any server you give it to <host>:8081,
-            # and a public HTTPS tunnel only answers on 443, so Metro is never
-            # reachable from the simulator as-is. Close the loop on the runner:
-            # resolve the tunnel's own hostname back to the runner and serve :8081
-            # there, forwarding to the real tunnel over 443. The upstream Host has
-            # to stay the tunnel hostname, because Cloudflare 403s anything else,
-            # and the upstream is dialed by IP so caddy cannot resolve the name we
-            # are about to shadow in /etc/hosts and loop back into itself.
+            # The Expo dev client rewrites any server you give it to <host>:8081 and
+            # refuses plain http outright (App Transport Security), while a public
+            # tunnel only answers on 443. So give the simulator a name of its own:
+            # shadow metro.native-sim.test to the runner, terminate TLS for it with
+            # Caddy's local CA, then forward to the real tunnel with that tunnel's
+            # Host and SNI intact. Cloudflare 403s (error 1034) if the Host is
+            # rewritten, and dialing by pinned IP is unreliable because trycloudflare
+            # rotates A records across edge clusters that do not all know the name.
             METRO_HOST=$(printf '%s' "$METRO_URL" | sed -E 's#https?://([^/:]+).*#\1#')
-            METRO_IP=$(dig +short "$METRO_HOST" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
-            [ -n "$METRO_IP" ] || { echo "::error::could not resolve $METRO_HOST"; exit 1; }
-            printf '127.0.0.1 %s\n' "$METRO_HOST" | sudo tee -a /etc/hosts > /dev/null
+            SHADOW=metro.native-sim.test
+            printf '127.0.0.1 %s\n' "$SHADOW" | sudo tee -a /etc/hosts > /dev/null
             brew install caddy
-            printf ':8081 {\n  reverse_proxy %s:443 {\n    transport http {\n      tls\n      tls_server_name %s\n    }\n    header_up Host %s\n  }\n}\n' "$METRO_IP" "$METRO_HOST" "$METRO_HOST" > metro-caddyfile
+            printf 'https://%s:8081 {\n  tls internal\n  reverse_proxy https://%s {\n    header_up Host %s\n  }\n}\n' "$SHADOW" "$METRO_HOST" "$METRO_HOST" > metro-caddyfile
             nohup caddy run --config metro-caddyfile --adapter caddyfile > caddy-metro.log 2>&1 &
             disown
             for _ in $(seq 1 30); do
-              curl -fsS --max-time 2 http://127.0.0.1:8081/status >/dev/null 2>&1 && break
+              curl -fsSk --max-time 3 "https://$SHADOW:8081/status" >/dev/null 2>&1 && break
               sleep 1
             done
-            curl -fsS --max-time 10 http://127.0.0.1:8081/status >/dev/null \
+            curl -fsSk --max-time 15 "https://$SHADOW:8081/status" >/dev/null \
               || { echo "::error::Metro tunnel is not reachable through the runner bridge"; cat caddy-metro.log; exit 1; }
-            echo "Metro bridge ready on simulator localhost:8081"
+            # The simulator accepts the bridge only once it trusts whoever signed it,
+            # and caddy writes its root on first issuance.
+            CA=""
+            for c in "$HOME/Library/Application Support/Caddy/pki/authorities/local/root.crt" \
+                     "$HOME/.local/share/caddy/pki/authorities/local/root.crt"; do
+              if [ -f "$c" ]; then CA="$c"; break; fi
+            done
+            if [ -z "$CA" ]; then
+              echo "::error::could not locate Caddy's root CA"
+              find "$HOME" -maxdepth 9 -path '*caddy/pki*' -name 'root.crt' 2>/dev/null | head -3
+              exit 1
+            fi
+            xcrun simctl keychain "$UDID" add-root-cert "$CA"
+            echo "Metro bridge ready: enter https://$SHADOW in the development launcher"
           fi
 
           xcrun simctl launch "$UDID" "$BUNDLE_ID"
